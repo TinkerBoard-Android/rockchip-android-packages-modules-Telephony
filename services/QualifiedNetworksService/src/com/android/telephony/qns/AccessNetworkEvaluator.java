@@ -1426,7 +1426,7 @@ class AccessNetworkEvaluator {
             return true;
         } else {
             if (mNetCapability == NetworkCapabilities.NET_CAPABILITY_IMS
-                    && mCallType == QnsConstants.CALL_TYPE_IDLE) {
+                    && mCallStatusTracker.isCallIdle(NetworkCapabilities.NET_CAPABILITY_IMS)) {
                 // Telephony will make new connection with preferred AccessNetwork
                 log("handover is not allowed. but need to move to target Transport.");
                 return true;

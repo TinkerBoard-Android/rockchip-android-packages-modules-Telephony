@@ -817,14 +817,18 @@ public class QnsCallStatusTracker {
                 }
             }
             //2. Notify a new ongoing call type
-            if (hasEmergencyCall() && mLastEmergencyCallType != QnsConstants.CALL_TYPE_EMERGENCY) {
-                mLastEmergencyCallType = QnsConstants.CALL_TYPE_EMERGENCY;
-                if (!isDataNetworkConnected(NetworkCapabilities.NET_CAPABILITY_EIMS)
-                        && isDataNetworkConnected(NetworkCapabilities.NET_CAPABILITY_IMS)) {
-                    notifyCallType(NetworkCapabilities.NET_CAPABILITY_IMS, mLastEmergencyCallType);
-                    mEmergencyOverIms = true;
-                } else {
-                    notifyCallType(NetworkCapabilities.NET_CAPABILITY_EIMS, mLastEmergencyCallType);
+            if (hasEmergencyCall()) {
+                if (mLastEmergencyCallType != QnsConstants.CALL_TYPE_EMERGENCY) {
+                    mLastEmergencyCallType = QnsConstants.CALL_TYPE_EMERGENCY;
+                    if (!isDataNetworkConnected(NetworkCapabilities.NET_CAPABILITY_EIMS)
+                            && isDataNetworkConnected(NetworkCapabilities.NET_CAPABILITY_IMS)) {
+                        notifyCallType(NetworkCapabilities.NET_CAPABILITY_IMS,
+                                mLastEmergencyCallType);
+                        mEmergencyOverIms = true;
+                    } else {
+                        notifyCallType(NetworkCapabilities.NET_CAPABILITY_EIMS,
+                                mLastEmergencyCallType);
+                    }
                 }
             } else if (hasVideoCall()) {
                 if (mLastNormalCallType != QnsConstants.CALL_TYPE_VIDEO) {
@@ -863,6 +867,21 @@ public class QnsCallStatusTracker {
 
     boolean isCallIdle() {
         return mCallStates.size() == 0;
+    }
+
+    boolean isCallIdle(int netCapability) {
+        int callNum = mCallStates.size();
+        if (callNum == 0) {
+            return true;
+        }
+        if (netCapability == NetworkCapabilities.NET_CAPABILITY_IMS) {
+            return (mLastNormalCallType == QnsConstants.CALL_TYPE_IDLE)
+                    && (mLastEmergencyCallType != QnsConstants.CALL_TYPE_IDLE
+                    && !mEmergencyOverIms);
+        } else if (netCapability == NetworkCapabilities.NET_CAPABILITY_EIMS) {
+            return mLastEmergencyCallType == QnsConstants.CALL_TYPE_IDLE || mEmergencyOverIms;
+        }
+        return false;
     }
 
     boolean hasEmergencyCall() {

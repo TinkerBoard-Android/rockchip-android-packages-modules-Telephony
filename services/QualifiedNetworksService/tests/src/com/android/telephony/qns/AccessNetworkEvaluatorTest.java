@@ -289,6 +289,8 @@ public class AccessNetworkEvaluatorTest extends QnsTest {
         when(mDataConnectionStatusTracker.isActiveState()).thenReturn(true);
         when(mDataConnectionStatusTracker.getLastTransportType())
                 .thenReturn(AccessNetworkConstants.TRANSPORT_TYPE_WLAN);
+        when(mMockQnsCallStatusTracker.isCallIdle(NetworkCapabilities.NET_CAPABILITY_IMS))
+                .thenReturn(true);
         List<Integer> accessNetworks = new ArrayList<>();
         accessNetworks.add(AccessNetworkConstants.AccessNetworkType.IWLAN);
         QnsTelephonyListener.QnsTelephonyInfo info =
@@ -349,6 +351,8 @@ public class AccessNetworkEvaluatorTest extends QnsTest {
         when(mDataConnectionStatusTracker.isActiveState()).thenReturn(true);
         when(mDataConnectionStatusTracker.getLastTransportType())
                 .thenReturn(AccessNetworkConstants.TRANSPORT_TYPE_WLAN);
+        when(mMockQnsCallStatusTracker.isCallIdle(NetworkCapabilities.NET_CAPABILITY_IMS))
+                .thenReturn(true);
         List<Integer> accessNetworks = new ArrayList<>();
         accessNetworks.add(AccessNetworkConstants.AccessNetworkType.IWLAN);
         QnsTelephonyListener.QnsTelephonyInfo info =
@@ -382,14 +386,20 @@ public class AccessNetworkEvaluatorTest extends QnsTest {
         mAne.onQnsTelephonyInfoChanged(infoIms);
         mAne.updateLastNotifiedQualifiedNetwork(accessNetworks);
         mAne.onSetCallType(QnsConstants.CALL_TYPE_VOICE);
+        when(mMockQnsCallStatusTracker.isCallIdle(NetworkCapabilities.NET_CAPABILITY_IMS))
+                .thenReturn(false);
         assertTrue(mAne.needHandoverPolicyCheck());
         assertFalse(mAne.moveTransportTypeAllowed());
         mAne.updateLastNotifiedQualifiedNetwork(accessNetworks);
         mAne.onSetCallType(QnsConstants.CALL_TYPE_IDLE);
+        when(mMockQnsCallStatusTracker.isCallIdle(NetworkCapabilities.NET_CAPABILITY_IMS))
+                .thenReturn(true);
         assertTrue(mAne.needHandoverPolicyCheck());
         assertTrue(mAne.moveTransportTypeAllowed());
         mAne.updateLastNotifiedQualifiedNetwork(accessNetworks);
         mAne.onSetCallType(QnsConstants.CALL_TYPE_EMERGENCY);
+        when(mMockQnsCallStatusTracker.isCallIdle(NetworkCapabilities.NET_CAPABILITY_IMS))
+                .thenReturn(false);
         assertTrue(mAne.needHandoverPolicyCheck());
         assertFalse(mAne.moveTransportTypeAllowed());
     }
