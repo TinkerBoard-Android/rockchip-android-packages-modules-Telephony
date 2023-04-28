@@ -35,6 +35,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Message;
 import android.os.PowerManager;
 import android.os.SystemClock;
@@ -50,6 +51,8 @@ import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+
+import java.util.concurrent.CountDownLatch;
 
 @RunWith(AndroidJUnit4.class)
 public class QnsTimerTest extends QnsTest {
@@ -305,5 +308,36 @@ public class QnsTimerTest extends QnsTest {
 
         // assume 100ms as max delay in execution
         assertTrue(delay < setDelay && delay > setDelay - 100);
+    }
+
+    @Test
+    public void testDeviceMovesToActiveState() {
+        int setDelay = 30000;
+        CountDownLatch latch = new CountDownLatch(2);
+        HandlerThread ht = new HandlerThread("");
+        ht.start();
+        Handler tempHandler = spy(new Handler(ht.getLooper()));
+        when(mPowerManager.isDeviceLightIdleMode()).thenReturn(true, false);
+        mBroadcastReceiver.onReceive(sMockContext, new Intent(Intent.ACTION_SCREEN_OFF));
+        mBroadcastReceiver.onReceive(
+                sMockContext, new Intent(PowerManager.ACTION_DEVICE_LIGHT_IDLE_MODE_CHANGED));
+        mQnsTimer.registerTimer(mMessage, setDelay);
+        waitForDelayedHandlerAction(mQnsTimer.mHandler, 10, 200);
+        verify(mAlarmManager)
+                .setExactAndAllowWhileIdle(anyInt(), anyLong(), isA(PendingIntent.class));
+        waitForDelayedHandlerAction(mQnsTimer.mHandler, 10, 5000);
+
+        mQnsTimer.mHandler = tempHandler;
+        mBroadcastReceiver.onReceive(
+                sMockContext, new Intent(PowerManager.ACTION_DEVICE_LIGHT_IDLE_MODE_CHANGED));
+        mBroadcastReceiver.onReceive(sMockContext, new Intent(Intent.ACTION_SCREEN_ON));
+        waitForDelayedHandlerAction(mQnsTimer.mHandler, 10, 200);
+        verify(mAlarmManager).cancel(isA(PendingIntent.class));
+
+        // Handler should reset for the updated delay
+        verify(tempHandler).removeMessages(EVENT_QNS_TIMER_EXPIRED);
+        verify(tempHandler).sendEmptyMessageDelayed(anyInt(), anyLong());
+        assertTrue(mQnsTimer.mHandler.hasMessages(EVENT_QNS_TIMER_EXPIRED));
+        ht.quit();
     }
 }

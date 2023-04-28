@@ -45,6 +45,11 @@ class QnsTimer {
 
     private static final String TAG = QnsTimer.class.getSimpleName();
     private static final int EVENT_QNS_TIMER_EXPIRED = 1;
+
+    private static final int MIN_ALARM_CALL_ACTIVE_DELAY_MS = 0;
+    private static final int MIN_ALARM_SCREEN_OFF_DELAY_MS = 10000;
+    private static final int MIN_ALARM_DEVICE_LIGHT_IDLE_DELAY_MS = 30000;
+    private static final int MIN_ALARM_DEVICE_IDLE_DELAY_MS = 60000;
     static final String ACTION_ALARM_TIMER_EXPIRED =
             "com.android.telephony.qns.action.ALARM_TIMER_EXPIRED";
 
@@ -56,11 +61,11 @@ class QnsTimer {
     private final BroadcastReceiver mBroadcastReceiver;
     private final PriorityQueue<TimerInfo> mTimerInfos;
     private PendingIntent mPendingIntent;
-    private long mMinAlarmTimeMs = 10000;
+    private long mMinAlarmTimeMs = MIN_ALARM_SCREEN_OFF_DELAY_MS;
     private int mCurrentAlarmTimerId = INVALID_ID;
     private int mCurrentHandlerTimerId = INVALID_ID;
     private boolean mIsAlarmRequired;
-    @VisibleForTesting final Handler mHandler;
+    @VisibleForTesting Handler mHandler;
     private long mLastAlarmTriggerAtMs = Long.MAX_VALUE;
     private int mCallType = CALL_TYPE_IDLE;
 
@@ -100,7 +105,7 @@ class QnsTimer {
         mHandler.post(
                 () -> {
                     mTimerInfos.add(timerInfo);
-                    updateToShortestDelay(mIsAlarmRequired, true);
+                    updateToShortestDelay(mIsAlarmRequired, false /* forceUpdate */);
                 });
         return timerId;
     }
@@ -120,7 +125,7 @@ class QnsTimer {
                     logd("Cancel timerId=" + timerId);
                     TimerInfo timerInfo = new TimerInfo(timerId);
                     if (mTimerInfos.remove(timerInfo) && timerId == mCurrentAlarmTimerId) {
-                        updateToShortestDelay(mIsAlarmRequired, true);
+                        updateToShortestDelay(mIsAlarmRequired, false /* forceUpdate */);
                     }
                 });
     }
@@ -136,20 +141,20 @@ class QnsTimer {
         if (mCallType == CALL_TYPE_IDLE && type != CALL_TYPE_IDLE) {
             mHandler.post(
                     () -> {
-                        mMinAlarmTimeMs = 0;
+                        mMinAlarmTimeMs = MIN_ALARM_CALL_ACTIVE_DELAY_MS;
                         if (mIsAlarmRequired) {
-                            updateToShortestDelay(true, false);
+                            updateToShortestDelay(true, true /* forceUpdate */);
                         }
                     });
         }
         mCallType = type;
         if (mCallType == CALL_TYPE_IDLE && mIsAlarmRequired) {
             if (mPowerManager.isDeviceIdleMode()) {
-                mMinAlarmTimeMs = 60000;
+                mMinAlarmTimeMs = MIN_ALARM_DEVICE_IDLE_DELAY_MS;
             } else if (mPowerManager.isDeviceLightIdleMode()) {
-                mMinAlarmTimeMs = 30000;
+                mMinAlarmTimeMs = MIN_ALARM_DEVICE_LIGHT_IDLE_DELAY_MS;
             } else {
-                mMinAlarmTimeMs = 10000; // SCREEN_OFF case
+                mMinAlarmTimeMs = MIN_ALARM_SCREEN_OFF_DELAY_MS; // SCREEN_OFF case
             }
         }
     }
@@ -161,11 +166,10 @@ class QnsTimer {
      * respective handlers.
      *
      * @param isAlarmRequired flag indicates if timer is need to setup with Alarm.
-     * @param skipTimerUpdate flag indicates if current scheduled alarm timers needs any change.
-     *     This flag will be false when call type changes or device moves or come out of idle state
-     *     because such cases mandates timer update.
+     * @param forceUpdate flag indicates to update the delay time for handler and/or alarm
+     *     forcefully.
      */
-    private void updateToShortestDelay(boolean isAlarmRequired, boolean skipTimerUpdate) {
+    private void updateToShortestDelay(boolean isAlarmRequired, boolean forceUpdate) {
         TimerInfo timerInfo = mTimerInfos.peek();
         long elapsedTime = getSystemElapsedRealTime();
         while (timerInfo != null && timerInfo.getExpireAtElapsedMillis() <= elapsedTime) {
@@ -181,14 +185,14 @@ class QnsTimer {
         }
         long delay = timerInfo.getExpireAtElapsedMillis() - elapsedTime;
         // Delayed Handler will always set for shortest delay.
-        if (timerInfo.getTimerId() != mCurrentHandlerTimerId) {
+        if (timerInfo.getTimerId() != mCurrentHandlerTimerId || forceUpdate) {
             mHandler.removeMessages(EVENT_QNS_TIMER_EXPIRED);
             mHandler.sendEmptyMessageDelayed(EVENT_QNS_TIMER_EXPIRED, delay);
             mCurrentHandlerTimerId = timerInfo.getTimerId();
         }
 
         // Alarm will always set for shortest from Math.max(delay, mMinAlarmTimeMs)
-        if (timerInfo.getTimerId() != mCurrentAlarmTimerId || !skipTimerUpdate) {
+        if (timerInfo.getTimerId() != mCurrentAlarmTimerId || forceUpdate) {
             if (isAlarmRequired) {
                 delay = Math.max(delay, mMinAlarmTimeMs);
                 // check if smaller timer alarm is already running for active timer info.
@@ -245,10 +249,13 @@ class QnsTimer {
                 case Intent.ACTION_SCREEN_OFF:
                     mHandler.post(
                             () -> {
-                                mMinAlarmTimeMs = (mCallType == CALL_TYPE_IDLE) ? 10000 : 0;
+                                mMinAlarmTimeMs =
+                                        (mCallType == CALL_TYPE_IDLE)
+                                                ? MIN_ALARM_SCREEN_OFF_DELAY_MS
+                                                : MIN_ALARM_CALL_ACTIVE_DELAY_MS;
                                 if (!mIsAlarmRequired) {
                                     mIsAlarmRequired = true;
-                                    updateToShortestDelay(true, false);
+                                    updateToShortestDelay(true, true /* forceUpdate */);
                                 }
                             });
                     break;
@@ -257,7 +264,7 @@ class QnsTimer {
                             () -> {
                                 if (mIsAlarmRequired) {
                                     mIsAlarmRequired = false;
-                                    updateToShortestDelay(false, false);
+                                    updateToShortestDelay(false, true /* forceUpdate */);
                                 }
                             });
                     break;
@@ -265,13 +272,19 @@ class QnsTimer {
                     mHandler.post(
                             () -> {
                                 if (mPowerManager.isDeviceLightIdleMode()) {
-                                    mMinAlarmTimeMs = (mCallType == CALL_TYPE_IDLE) ? 30000 : 0;
+                                    mMinAlarmTimeMs =
+                                            (mCallType == CALL_TYPE_IDLE)
+                                                    ? MIN_ALARM_DEVICE_LIGHT_IDLE_DELAY_MS
+                                                    : MIN_ALARM_CALL_ACTIVE_DELAY_MS;
                                     if (!mIsAlarmRequired) {
                                         mIsAlarmRequired = true;
-                                        updateToShortestDelay(true, false);
+                                        updateToShortestDelay(true, true /* forceUpdate */);
                                     }
                                 } else {
-                                    mMinAlarmTimeMs = (mCallType == CALL_TYPE_IDLE) ? 10000 : 0;
+                                    mMinAlarmTimeMs =
+                                            (mCallType == CALL_TYPE_IDLE)
+                                                    ? MIN_ALARM_SCREEN_OFF_DELAY_MS
+                                                    : MIN_ALARM_CALL_ACTIVE_DELAY_MS;
                                 }
                             });
                     break;
@@ -279,13 +292,19 @@ class QnsTimer {
                     mHandler.post(
                             () -> {
                                 if (mPowerManager.isDeviceIdleMode()) {
-                                    mMinAlarmTimeMs = (mCallType == CALL_TYPE_IDLE) ? 60000 : 0;
+                                    mMinAlarmTimeMs =
+                                            (mCallType == CALL_TYPE_IDLE)
+                                                    ? MIN_ALARM_DEVICE_IDLE_DELAY_MS
+                                                    : MIN_ALARM_CALL_ACTIVE_DELAY_MS;
                                     if (!mIsAlarmRequired) {
                                         mIsAlarmRequired = true;
-                                        updateToShortestDelay(true, false);
+                                        updateToShortestDelay(true, true /* forceUpdate */);
                                     }
                                 } else {
-                                    mMinAlarmTimeMs = (mCallType == CALL_TYPE_IDLE) ? 10000 : 0;
+                                    mMinAlarmTimeMs =
+                                            (mCallType == CALL_TYPE_IDLE)
+                                                    ? MIN_ALARM_SCREEN_OFF_DELAY_MS
+                                                    : MIN_ALARM_CALL_ACTIVE_DELAY_MS;
                                 }
                             });
                     break;
@@ -307,7 +326,7 @@ class QnsTimer {
             switch (msg.what) {
                 case EVENT_QNS_TIMER_EXPIRED:
                     logd("Timer expired");
-                    updateToShortestDelay(mIsAlarmRequired, true);
+                    updateToShortestDelay(mIsAlarmRequired, false /* forceUpdate */);
                     break;
                 default:
                     break;
